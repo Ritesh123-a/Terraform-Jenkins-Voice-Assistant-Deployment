@@ -1,0 +1,88 @@
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'ACTION', choices: ['apply', 'destroy'], description: 'Terraform action')
+        booleanParam(name: 'AUTO_APPROVE', defaultValue: false, description: 'Skip manual approval')
+    }
+
+    environment {
+        AWS_DEFAULT_REGION = 'us-east-1'
+        TF_IN_AUTOMATION   = 'true'
+        TF_INPUT           = '0'
+    }
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Terraform Init') {
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
+                                  credentialsId: 'aws-creds']]) {
+                    sh 'terraform init -upgrade'
+                }
+            }
+        }
+
+        stage('Validate & Format') {
+            steps {
+                sh 'terraform fmt -recursive'
+                sh 'terraform validate'
+            }
+        }
+
+        stage('Terraform Plan') {
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
+                                  credentialsId: 'aws-creds'],
+                                 file(credentialsId: 'jarvis-public-key', variable: 'PUB_KEY_FILE')]) {
+                    script {
+                        def destroyFlag = params.ACTION == 'destroy' ? '-destroy' : ''
+                        sh "terraform plan ${destroyFlag} -var=public_key_path=${PUB_KEY_FILE} -out=tfplan"
+                    }
+                }
+            }
+        }
+
+        stage('Approval') {
+            when { expression { !params.AUTO_APPROVE } }
+            steps {
+                input message: "Run terraform ${params.ACTION}?", ok: 'Proceed'
+            }
+        }
+
+        stage('Terraform Apply') {
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
+                                  credentialsId: 'aws-creds']]) {
+                    sh 'terraform apply -auto-approve tfplan'
+                }
+            }
+        }
+
+        stage('Show Outputs') {
+            when { expression { params.ACTION == 'apply' } }
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
+                                  credentialsId: 'aws-creds']]) {
+                    sh 'terraform output || true'
+                }
+            }
+        }
+    }
+
+    post {
+        success { echo "Terraform ${params.ACTION} completed." }
+        failure { echo 'Pipeline failed. Check logs.' }
+        always  { archiveArtifacts artifacts: 'tfplan', allowEmptyArchive: true }
+    }
+}

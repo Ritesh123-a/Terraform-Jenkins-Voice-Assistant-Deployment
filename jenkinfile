@@ -1,87 +1,67 @@
+
 pipeline {
     agent any
 
-    parameters {
-        choice(name: 'ACTION', choices: ['apply', 'destroy'], description: 'Terraform action')
-        booleanParam(name: 'AUTO_APPROVE', defaultValue: false, description: 'Skip manual approval')
+    tools {
+        terraform 'terraform'
     }
 
     environment {
-        AWS_DEFAULT_REGION = 'us-east-1'
-        TF_IN_AUTOMATION   = 'true'
-        TF_INPUT           = '0'
-    }
-
-    options {
-        disableConcurrentBuilds()
+        AWS_DEFAULT_REGION = 'ap-south-1'
     }
 
     stages {
-        stage('Checkout') {
+
+        stage('Git Checkout') {
             steps {
-                checkout scm
+                git branch: 'main',
+                    url: 'https://github.com/Ritesh123-a/Terraform-Jenkins-Voice-Assistant-Deployment'
             }
         }
 
         stage('Terraform Init') {
             steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
-                                  credentialsId: 'aws-creds']]) {
-                    sh 'terraform init -upgrade'
-                }
+                sh 'terraform init'
             }
         }
 
-        stage('Validate & Format') {
+        stage('Terraform Validate') {
             steps {
-                sh 'terraform fmt -recursive'
                 sh 'terraform validate'
             }
         }
 
         stage('Terraform Plan') {
             steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
-                                  credentialsId: 'aws-creds'],
-                                 file(credentialsId: 'jarvis-public-key', variable: 'PUB_KEY_FILE')]) {
-                    script {
-                        def destroyFlag = params.ACTION == 'destroy' ? '-destroy' : ''
-                        sh "terraform plan ${destroyFlag} -var=public_key_path=${PUB_KEY_FILE} -out=tfplan"
-                    }
-                }
-            }
-        }
-
-        stage('Approval') {
-            when { expression { !params.AUTO_APPROVE } }
-            steps {
-                input message: "Run terraform ${params.ACTION}?", ok: 'Proceed'
+                sh 'terraform plan -out=tfplan'
             }
         }
 
         stage('Terraform Apply') {
             steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
-                                  credentialsId: 'aws-creds']]) {
-                    sh 'terraform apply -auto-approve tfplan'
-                }
+                sh 'terraform apply -auto-approve tfplan'
             }
         }
 
-        stage('Show Outputs') {
-            when { expression { params.ACTION == 'apply' } }
+        stage('Show EC2 Public IP') {
             steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
-                                  credentialsId: 'aws-creds']]) {
-                    sh 'terraform output || true'
-                }
+                sh 'terraform output'
+                sh 'terraform state list'
             }
         }
     }
 
     post {
-        success { echo "Terraform ${params.ACTION} completed." }
-        failure { echo 'Pipeline failed. Check logs.' }
-        always  { archiveArtifacts artifacts: 'tfplan', allowEmptyArchive: true }
+        success {
+            echo 'Terraform deployment completed successfully!'
+        }
+
+        failure {
+            echo 'Terraform deployment failed. Check Jenkins console output.'
+        }
+
+        always {
+            echo 'Pipeline execution completed.'
+        }
     }
 }

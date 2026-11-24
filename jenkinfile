@@ -2,20 +2,16 @@
 pipeline {
     agent any
 
-    tools {
-        terraform 'terraform'
-    }
-
-    environment {
-        AWS_DEFAULT_REGION = 'ap-south-1'
-    }
-
     stages {
-
-        stage('Git Checkout') {
+        stage('Checkout') {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/Ritesh123-a/Terraform-Jenkins-Voice-Assistant-Deployment'
+                checkout scm
+            }
+        }
+
+        stage('Terraform Version') {
+            steps {
+                sh 'terraform version'
             }
         }
 
@@ -33,35 +29,8 @@ pipeline {
 
         stage('Terraform Plan') {
             steps {
-                sh 'terraform plan -out=tfplan'
+                sh 'terraform plan'
             }
-        }
-
-        stage('Terraform Apply') {
-            steps {
-                sh 'terraform apply -auto-approve tfplan'
-            }
-        }
-
-        stage('Show EC2 Public IP') {
-            steps {
-                sh 'terraform output'
-                sh 'terraform state list'
-            }
-        }
-    }
-
-    post {
-        success {
-            echo 'Terraform deployment completed successfully!'
-        }
-
-        failure {
-            echo 'Terraform deployment failed. Check Jenkins console output.'
-        }
-
-        always {
-            echo 'Pipeline execution completed.'
         }
     }
 }
